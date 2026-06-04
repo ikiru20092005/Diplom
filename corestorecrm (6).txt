@@ -1,0 +1,1131 @@
+-- phpMyAdmin SQL Dump
+-- version 5.2.1
+-- https://www.phpmyadmin.net/
+--
+-- Хост: 127.0.0.1
+-- Время создания: Июн 04 2026 г., 09:12
+-- Версия сервера: 10.4.32-MariaDB
+-- Версия PHP: 8.2.12
+
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
+
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
+
+--
+-- База данных: `corestorecrm`
+--
+
+DELIMITER $$
+--
+-- Процедуры
+--
+CREATE DEFINER=`root`@`localhost` PROCEDURE `AssignAppeal` (IN `p_appealId` INT, IN `p_employeeId` INT)   BEGIN
+    UPDATE Appeal
+    SET employeeId = p_employeeId,
+        changeDate = NOW()
+    WHERE appealId = p_appealId;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `CloseAppeal` (IN `p_appealId` INT)   BEGIN
+    UPDATE `Appeal`
+    SET appealStatusId = 3,
+        closeDate = NOW()
+    WHERE appealId = p_appealId;
+
+    UPDATE `Message`
+    SET isRead = 1
+    WHERE appealId = p_appealId;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `CreateAppeal` (IN `p_userId` INT, IN `p_appealTypeId` INT, IN `p_messageText` TEXT)   BEGIN
+    DECLARE v_appealId INT;
+    DECLARE v_employeeId INT;
+
+    SELECT employeeId
+    INTO v_employeeId
+    FROM Employee
+    WHERE departmentId = 1
+    ORDER BY
+    (
+        SELECT COUNT(*)
+        FROM Appeal a
+        WHERE a.employeeId = Employee.employeeId
+        AND a.appealStatusId <> 3
+    ) ASC
+    LIMIT 1;
+
+    INSERT INTO Appeal
+    (
+        createDate,
+        changeDate,
+        appealStatusId,
+        userId,
+        employeeId,
+        appealTypeId
+    )
+    VALUES
+    (
+        NOW(),
+        NOW(),
+        1,
+        p_userId,
+        v_employeeId,
+        p_appealTypeId
+    );
+
+    SET v_appealId = LAST_INSERT_ID();
+
+    INSERT INTO Message
+    (
+        createdAt,
+        isRead,
+        isFromManager,
+        messageText,
+        userId,
+        appealId
+    )
+    VALUES
+    (
+        NOW(),
+        0,
+        0,
+        p_messageText,
+        p_userId,
+        v_appealId
+    );
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `DeleteFile` (IN `p_fileId` INT)   BEGIN
+    DELETE
+    FROM Attachment
+    WHERE attachmentId = p_fileId;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetAppealMessages` (IN `p_appealId` INT)   BEGIN
+
+    SELECT
+        m.messageId,
+        m.createdAt,
+        m.isRead,
+        m.isFromManager,
+        m.messageText,
+        m.userId,
+        u.name,
+        m.appealId
+    FROM Message m
+        INNER JOIN User u
+            ON u.userId = m.userId
+    WHERE m.appealId = p_appealId
+    ORDER BY m.createdAt ASC;
+
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetClientAppeals` (IN `p_userId` INT)   BEGIN
+    SELECT
+        a.appealId,
+        at.name AS appealType,
+        aps.name AS appealStatus,
+        a.createDate
+    FROM `Appeal` a
+    JOIN `AppealType` at ON a.appealTypeId = at.appealTypeId
+    JOIN `AppealStatus` aps ON a.appealStatusId = aps.appealStatusId
+    WHERE a.userId = p_userId
+    ORDER BY a.createDate DESC;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetClientInfo` (IN `p_userId` INT)   BEGIN
+    SELECT userId, name, email, phone
+    FROM `User`
+    WHERE userId = p_userId;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetClientOrders` (IN `p_userId` INT)   BEGIN
+    SELECT
+        o.orderId,
+        o.startDate,
+        o.amount,
+        os.name AS statusName,
+        o.address
+    FROM `Order` o
+    JOIN `OrderStatus` os ON o.orderStatusId = os.orderStatusId
+    WHERE o.userId = p_userId
+    ORDER BY o.startDate DESC;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetClosedAppealsReport` ()   BEGIN
+    SELECT
+        a.appealId,
+        a.createDate,
+        a.closeDate,
+        at.name AS type,
+        u.name AS client
+    FROM `Appeal` a
+    JOIN `AppealType` at ON at.appealTypeId = a.appealTypeId
+    JOIN `User` u ON u.userId = a.userId
+    WHERE a.appealStatusId = 3;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetFileById` (IN `p_fileId` INT)   BEGIN
+    SELECT *
+    FROM Attachment
+    WHERE attachmentId = p_fileId;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetFilesByMessage` (IN `p_messageId` INT)   BEGIN
+    SELECT *
+    FROM Attachment
+    WHERE messageId = p_messageId;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetLeastLoadedManager` ()   BEGIN
+    SELECT employeeId
+    FROM `Employee`
+    WHERE departmentId = 1
+    ORDER BY (
+        SELECT COUNT(*)
+        FROM `Appeal`
+        WHERE employeeId = Employee.employeeId
+          AND appealStatusId <> 3
+    ) ASC
+    LIMIT 1;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetManagerAppeals` ()   BEGIN
+
+    SELECT
+        a.appealId,
+        u.name AS clientName,
+        at.name AS appealType,
+        aps.name AS appealStatus,
+        e.fullName AS managerName,
+        a.createDate,
+        a.changeDate
+    FROM Appeal a
+        INNER JOIN User u
+            ON u.userId = a.userId
+        INNER JOIN AppealType at
+            ON at.appealTypeId = a.appealTypeId
+        INNER JOIN AppealStatus aps
+            ON aps.appealStatusId = a.appealStatusId
+        LEFT JOIN Employee e
+            ON e.employeeId = a.employeeId
+    ORDER BY a.changeDate DESC;
+
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetNotifications` (IN `p_userId` INT)   BEGIN
+    SELECT
+        m.messageId,
+        m.createdAt,
+        m.messageText,
+        m.appealId
+    FROM Message m
+    INNER JOIN Appeal a
+        ON a.appealId = m.appealId
+    WHERE a.userId = p_userId
+        AND m.userId <> p_userId
+        AND m.isRead = 0
+        AND a.appealStatusId <> 3
+    ORDER BY m.createdAt DESC;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetUserAppeals` (IN `p_userId` INT)   BEGIN
+    SELECT
+        a.appealId,
+        at.name AS appealType,
+        aps.name AS appealStatus,
+        a.createDate,
+        (
+            SELECT m.messageText
+            FROM `Message` m
+            WHERE m.appealId = a.appealId
+            ORDER BY m.createdAt
+            LIMIT 1
+        ) AS description
+    FROM `Appeal` a
+    JOIN `AppealType` at ON a.appealTypeId = at.appealTypeId
+    JOIN `AppealStatus` aps ON a.appealStatusId = aps.appealStatusId
+    WHERE a.userId = p_userId
+    ORDER BY a.createDate DESC;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `GetUserByCredentials` (IN `p_email` VARCHAR(255), IN `p_password` VARCHAR(255))   BEGIN
+    SELECT userId, email, name, phone, roleId
+    FROM `User`
+    WHERE email = p_email
+      AND passwordHash = p_password;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `InsertFile` (IN `p_messageId` INT, IN `p_fileName` TEXT, IN `p_filePath` TEXT)   BEGIN
+    INSERT INTO Attachment
+    (
+        fileName,
+        filePath,
+        messageId
+    )
+    VALUES
+    (
+        p_fileName,
+        p_filePath,
+        p_messageId
+    );
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `MarkMessagesAsRead` (IN `p_appealId` INT)   BEGIN
+    UPDATE `Message`
+    SET isRead = 1
+    WHERE appealId = p_appealId;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `SendMessage` (IN `p_appealId` INT, IN `p_userId` INT, IN `p_isFromManager` TINYINT, IN `p_messageText` TEXT)   BEGIN
+
+    INSERT INTO Message
+    (
+        createdAt,
+        isRead,
+        isFromManager,
+        messageText,
+        userId,
+        appealId
+    )
+    VALUES
+    (
+        NOW(),
+        0,
+        p_isFromManager,
+        p_messageText,
+        p_userId,
+        p_appealId
+    );
+
+    UPDATE Appeal
+    SET
+        changeDate = NOW(),
+        appealStatusId =
+            CASE
+                WHEN appealStatusId = 1 THEN 2
+                ELSE appealStatusId
+            END
+    WHERE appealId = p_appealId;
+
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_UpdateUserProfile` (IN `p_userId` INT, IN `p_name` VARCHAR(255), IN `p_email` VARCHAR(255), IN `p_phone` VARCHAR(50))   BEGIN
+    UPDATE users
+    SET name = p_name,
+        email = p_email,
+        phone = p_phone
+    WHERE userId = p_userId;
+END$$
+
+DELIMITER ;
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `appeal`
+--
+
+CREATE TABLE `appeal` (
+  `appealId` int(11) NOT NULL,
+  `createDate` date DEFAULT NULL,
+  `closeDate` date DEFAULT NULL,
+  `changeDate` date DEFAULT NULL,
+  `appealStatusId` int(11) DEFAULT NULL,
+  `userId` int(11) DEFAULT NULL,
+  `employeeId` int(11) DEFAULT NULL,
+  `appealTypeId` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `appeal`
+--
+
+INSERT INTO `appeal` (`appealId`, `createDate`, `closeDate`, `changeDate`, `appealStatusId`, `userId`, `employeeId`, `appealTypeId`) VALUES
+(1, '2026-06-03', NULL, '2026-06-03', 1, 1, 1, 1),
+(2, '2026-06-03', NULL, '2026-06-03', 1, 2, 1, 2);
+
+--
+-- Триггеры `appeal`
+--
+DELIMITER $$
+CREATE TRIGGER `trg_close_appeal` BEFORE UPDATE ON `appeal` FOR EACH ROW BEGIN
+    IF NEW.appealStatusId = 3
+       AND OLD.appealStatusId <> 3 THEN
+
+        SET NEW.closeDate = NOW();
+
+    END IF;
+END
+$$
+DELIMITER ;
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `appealstatus`
+--
+
+CREATE TABLE `appealstatus` (
+  `appealStatusId` int(11) NOT NULL,
+  `name` varchar(100) DEFAULT NULL,
+  `description` text DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `appealstatus`
+--
+
+INSERT INTO `appealstatus` (`appealStatusId`, `name`, `description`) VALUES
+(1, 'Новое', 'Новое обращение'),
+(2, 'В работе', 'Обрабатывается'),
+(3, 'Закрыто', 'Завершено');
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `appealtype`
+--
+
+CREATE TABLE `appealtype` (
+  `appealTypeId` int(11) NOT NULL,
+  `name` varchar(100) DEFAULT NULL,
+  `description` text DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `appealtype`
+--
+
+INSERT INTO `appealtype` (`appealTypeId`, `name`, `description`) VALUES
+(1, 'Вопрос', 'Общий вопрос'),
+(2, 'Проблема', 'Проблема с заказом'),
+(3, 'Техническая поддержка', 'Технический вопрос');
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `attachment`
+--
+
+CREATE TABLE `attachment` (
+  `attachmentId` int(11) NOT NULL,
+  `fileName` text DEFAULT NULL,
+  `filePath` text DEFAULT NULL,
+  `messageId` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `attachment`
+--
+
+INSERT INTO `attachment` (`attachmentId`, `fileName`, `filePath`, `messageId`) VALUES
+(1, 'screenshot.png', '/files/screenshot.png', 1);
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `currency`
+--
+
+CREATE TABLE `currency` (
+  `currencyId` int(11) NOT NULL,
+  `name` varchar(50) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `currency`
+--
+
+INSERT INTO `currency` (`currencyId`, `name`) VALUES
+(1, 'RUB'),
+(2, 'USD');
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `department`
+--
+
+CREATE TABLE `department` (
+  `departmentId` int(11) NOT NULL,
+  `name` varchar(100) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `department`
+--
+
+INSERT INTO `department` (`departmentId`, `name`) VALUES
+(1, 'Поддержка'),
+(2, 'Продажи'),
+(3, 'IT отдел');
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `employee`
+--
+
+CREATE TABLE `employee` (
+  `employeeId` int(11) NOT NULL,
+  `fullName` varchar(255) DEFAULT NULL,
+  `contacts` varchar(500) DEFAULT NULL,
+  `positionId` int(11) DEFAULT NULL,
+  `userId` int(11) DEFAULT NULL,
+  `departmentId` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `employee`
+--
+
+INSERT INTO `employee` (`employeeId`, `fullName`, `contacts`, `positionId`, `userId`, `departmentId`) VALUES
+(1, 'Мария Иванова', '+79990000003', 1, 3, 1);
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `message`
+--
+
+CREATE TABLE `message` (
+  `messageId` int(11) NOT NULL,
+  `createdAt` datetime DEFAULT NULL,
+  `isRead` tinyint(4) DEFAULT NULL,
+  `isFromManager` tinyint(4) DEFAULT NULL,
+  `messageText` text DEFAULT NULL,
+  `userId` int(11) DEFAULT NULL,
+  `appealId` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `message`
+--
+
+INSERT INTO `message` (`messageId`, `createdAt`, `isRead`, `isFromManager`, `messageText`, `userId`, `appealId`) VALUES
+(1, '2026-06-03 18:38:16', 0, 0, 'Здравствуйте, у меня проблема с заказом', 1, 1),
+(2, '2026-06-03 18:38:16', 0, 1, 'Здравствуйте, уточните проблему', 1, 1),
+(3, '2026-06-03 18:38:16', 0, 0, 'Не приходит товар', 2, 2);
+
+--
+-- Триггеры `message`
+--
+DELIMITER $$
+CREATE TRIGGER `trg_update_appeal_change_date` AFTER INSERT ON `message` FOR EACH ROW BEGIN
+    UPDATE Appeal
+    SET changeDate = NOW()
+    WHERE appealId = NEW.appealId;
+END
+$$
+DELIMITER ;
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `order`
+--
+
+CREATE TABLE `order` (
+  `orderId` int(11) NOT NULL,
+  `startDate` date DEFAULT NULL,
+  `endDate` date DEFAULT NULL,
+  `address` varchar(500) DEFAULT NULL,
+  `amount` decimal(10,2) DEFAULT NULL,
+  `userId` int(11) DEFAULT NULL,
+  `orderStatusId` int(11) DEFAULT NULL,
+  `employeeId` int(11) DEFAULT NULL,
+  `currencyId` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `order`
+--
+
+INSERT INTO `order` (`orderId`, `startDate`, `endDate`, `address`, `amount`, `userId`, `orderStatusId`, `employeeId`, `currencyId`) VALUES
+(1, '2026-06-01', NULL, 'Москва, Ленина 10', 99900.00, 1, 1, 1, 1),
+(2, '2026-06-02', NULL, 'Москва, Пушкина 5', 85000.00, 2, 1, 1, 1);
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `ordercontent`
+--
+
+CREATE TABLE `ordercontent` (
+  `orderContentId` int(11) NOT NULL,
+  `quantity` int(11) DEFAULT NULL,
+  `rowAmount` decimal(10,2) DEFAULT NULL,
+  `orderId` int(11) DEFAULT NULL,
+  `productId` int(11) DEFAULT NULL,
+  `currencyId` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `ordercontent`
+--
+
+INSERT INTO `ordercontent` (`orderContentId`, `quantity`, `rowAmount`, `orderId`, `productId`, `currencyId`) VALUES
+(1, 1, 99900.00, 1, 1, 1),
+(2, 1, 85000.00, 2, 2, 1);
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `orderstatus`
+--
+
+CREATE TABLE `orderstatus` (
+  `orderStatusId` int(11) NOT NULL,
+  `name` varchar(100) DEFAULT NULL,
+  `description` text DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `orderstatus`
+--
+
+INSERT INTO `orderstatus` (`orderStatusId`, `name`, `description`) VALUES
+(1, 'Новый', 'Заказ создан'),
+(2, 'В обработке', 'Обрабатывается менеджером'),
+(3, 'Завершён', 'Заказ выполнен');
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `positions`
+--
+
+CREATE TABLE `positions` (
+  `positionId` int(11) NOT NULL,
+  `name` varchar(100) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `positions`
+--
+
+INSERT INTO `positions` (`positionId`, `name`) VALUES
+(1, 'Менеджер поддержки'),
+(2, 'Старший менеджер'),
+(3, 'Администратор');
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `price`
+--
+
+CREATE TABLE `price` (
+  `priceId` int(11) NOT NULL,
+  `startDate` date DEFAULT NULL,
+  `endDate` date DEFAULT NULL,
+  `amount` decimal(10,2) DEFAULT NULL,
+  `productId` int(11) DEFAULT NULL,
+  `currencyId` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `price`
+--
+
+INSERT INTO `price` (`priceId`, `startDate`, `endDate`, `amount`, `productId`, `currencyId`) VALUES
+(1, '2026-01-01', NULL, 99900.00, 1, 1),
+(2, '2026-01-01', NULL, 85000.00, 2, 1),
+(3, '2026-01-01', NULL, 2999.00, 3, 1);
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `product`
+--
+
+CREATE TABLE `product` (
+  `productId` int(11) NOT NULL,
+  `name` varchar(255) DEFAULT NULL,
+  `description` text DEFAULT NULL,
+  `remains` int(11) DEFAULT NULL,
+  `honestSign` int(11) DEFAULT NULL,
+  `unit` varchar(255) DEFAULT NULL,
+  `productTypeId` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `product`
+--
+
+INSERT INTO `product` (`productId`, `name`, `description`, `remains`, `honestSign`, `unit`, `productTypeId`) VALUES
+(1, 'iPhone 14', 'Смартфон Apple', 10, 123456, 'шт', 1),
+(2, 'Samsung Galaxy S23', 'Флагман Samsung', 15, 654321, 'шт', 1),
+(3, 'Футболка Nike', 'Спортивная футболка', 50, 111222, 'шт', 2);
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `producttype`
+--
+
+CREATE TABLE `producttype` (
+  `productTypeId` int(11) NOT NULL,
+  `name` varchar(255) DEFAULT NULL,
+  `description` text DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `producttype`
+--
+
+INSERT INTO `producttype` (`productTypeId`, `name`, `description`) VALUES
+(1, 'Электроника', 'Гаджеты и устройства'),
+(2, 'Одежда', 'Повседневная одежда');
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `role`
+--
+
+CREATE TABLE `role` (
+  `roleId` int(11) NOT NULL,
+  `name` varchar(100) DEFAULT NULL,
+  `description` text DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `role`
+--
+
+INSERT INTO `role` (`roleId`, `name`, `description`) VALUES
+(1, 'customer', 'Обычный клиент'),
+(2, 'manager', 'Менеджер поддержки'),
+(3, 'admin', 'Администратор системы');
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `user`
+--
+
+CREATE TABLE `user` (
+  `userId` int(11) NOT NULL,
+  `email` varchar(255) DEFAULT NULL,
+  `passwordHash` varchar(255) DEFAULT NULL,
+  `name` varchar(255) DEFAULT NULL,
+  `phone` varchar(20) DEFAULT NULL,
+  `roleId` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `user`
+--
+
+INSERT INTO `user` (`userId`, `email`, `passwordHash`, `name`, `phone`, `roleId`) VALUES
+(1, 'ivan@mail.com', '$2a$11$k8BXUWXswlmd9r2TInKkaOvLi0iFtU92s.0sgAx3F6/lH95OPxaYq', 'Иван Петров', '+79990000001', 1),
+(2, 'alex@mail.com', 'hash2', 'Алексей Смирнов', '+79990000002', 1),
+(3, 'manager@mail.com', '$2a$11$c3rwabh3njnUaICjkCzM7e7Ar9YGre9fjcPIGW0PSH06E4Ydw2CWe', 'Мария Иванова', '+79990000003', 2),
+(4, 'admin@mail.com', 'hash4', 'Администратор', '+79990000004', 3);
+
+--
+-- Триггеры `user`
+--
+DELIMITER $$
+CREATE TRIGGER `trg_create_waiting_list` AFTER INSERT ON `user` FOR EACH ROW BEGIN
+    INSERT INTO WaitingList(userId)
+    VALUES(NEW.userId);
+END
+$$
+DELIMITER ;
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `waitinglist`
+--
+
+CREATE TABLE `waitinglist` (
+  `waitingListId` int(11) NOT NULL,
+  `userId` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `waitinglist`
+--
+
+INSERT INTO `waitinglist` (`waitingListId`, `userId`) VALUES
+(1, 1),
+(2, 2);
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `waitinglistcontent`
+--
+
+CREATE TABLE `waitinglistcontent` (
+  `waitingListContentId` int(11) NOT NULL,
+  `productId` int(11) DEFAULT NULL,
+  `waitingListId` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `waitinglistcontent`
+--
+
+INSERT INTO `waitinglistcontent` (`waitingListContentId`, `productId`, `waitingListId`) VALUES
+(1, 1, 1),
+(2, 2, 1),
+(3, 3, 2);
+
+--
+-- Индексы сохранённых таблиц
+--
+
+--
+-- Индексы таблицы `appeal`
+--
+ALTER TABLE `appeal`
+  ADD PRIMARY KEY (`appealId`),
+  ADD KEY `appealStatusId` (`appealStatusId`),
+  ADD KEY `userId` (`userId`),
+  ADD KEY `employeeId` (`employeeId`),
+  ADD KEY `appealTypeId` (`appealTypeId`);
+
+--
+-- Индексы таблицы `appealstatus`
+--
+ALTER TABLE `appealstatus`
+  ADD PRIMARY KEY (`appealStatusId`);
+
+--
+-- Индексы таблицы `appealtype`
+--
+ALTER TABLE `appealtype`
+  ADD PRIMARY KEY (`appealTypeId`);
+
+--
+-- Индексы таблицы `attachment`
+--
+ALTER TABLE `attachment`
+  ADD PRIMARY KEY (`attachmentId`),
+  ADD KEY `messageId` (`messageId`);
+
+--
+-- Индексы таблицы `currency`
+--
+ALTER TABLE `currency`
+  ADD PRIMARY KEY (`currencyId`);
+
+--
+-- Индексы таблицы `department`
+--
+ALTER TABLE `department`
+  ADD PRIMARY KEY (`departmentId`);
+
+--
+-- Индексы таблицы `employee`
+--
+ALTER TABLE `employee`
+  ADD PRIMARY KEY (`employeeId`),
+  ADD KEY `positionId` (`positionId`),
+  ADD KEY `userId` (`userId`),
+  ADD KEY `departmentId` (`departmentId`);
+
+--
+-- Индексы таблицы `message`
+--
+ALTER TABLE `message`
+  ADD PRIMARY KEY (`messageId`),
+  ADD KEY `userId` (`userId`),
+  ADD KEY `appealId` (`appealId`);
+
+--
+-- Индексы таблицы `order`
+--
+ALTER TABLE `order`
+  ADD PRIMARY KEY (`orderId`),
+  ADD KEY `userId` (`userId`),
+  ADD KEY `orderStatusId` (`orderStatusId`),
+  ADD KEY `employeeId` (`employeeId`),
+  ADD KEY `currencyId` (`currencyId`);
+
+--
+-- Индексы таблицы `ordercontent`
+--
+ALTER TABLE `ordercontent`
+  ADD PRIMARY KEY (`orderContentId`),
+  ADD KEY `orderId` (`orderId`),
+  ADD KEY `productId` (`productId`),
+  ADD KEY `currencyId` (`currencyId`);
+
+--
+-- Индексы таблицы `orderstatus`
+--
+ALTER TABLE `orderstatus`
+  ADD PRIMARY KEY (`orderStatusId`);
+
+--
+-- Индексы таблицы `positions`
+--
+ALTER TABLE `positions`
+  ADD PRIMARY KEY (`positionId`);
+
+--
+-- Индексы таблицы `price`
+--
+ALTER TABLE `price`
+  ADD PRIMARY KEY (`priceId`),
+  ADD KEY `productId` (`productId`),
+  ADD KEY `currencyId` (`currencyId`);
+
+--
+-- Индексы таблицы `product`
+--
+ALTER TABLE `product`
+  ADD PRIMARY KEY (`productId`),
+  ADD KEY `productTypeId` (`productTypeId`);
+
+--
+-- Индексы таблицы `producttype`
+--
+ALTER TABLE `producttype`
+  ADD PRIMARY KEY (`productTypeId`);
+
+--
+-- Индексы таблицы `role`
+--
+ALTER TABLE `role`
+  ADD PRIMARY KEY (`roleId`);
+
+--
+-- Индексы таблицы `user`
+--
+ALTER TABLE `user`
+  ADD PRIMARY KEY (`userId`),
+  ADD KEY `roleId` (`roleId`);
+
+--
+-- Индексы таблицы `waitinglist`
+--
+ALTER TABLE `waitinglist`
+  ADD PRIMARY KEY (`waitingListId`),
+  ADD UNIQUE KEY `userId` (`userId`);
+
+--
+-- Индексы таблицы `waitinglistcontent`
+--
+ALTER TABLE `waitinglistcontent`
+  ADD PRIMARY KEY (`waitingListContentId`),
+  ADD KEY `productId` (`productId`),
+  ADD KEY `waitingListId` (`waitingListId`);
+
+--
+-- AUTO_INCREMENT для сохранённых таблиц
+--
+
+--
+-- AUTO_INCREMENT для таблицы `appeal`
+--
+ALTER TABLE `appeal`
+  MODIFY `appealId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+
+--
+-- AUTO_INCREMENT для таблицы `appealstatus`
+--
+ALTER TABLE `appealstatus`
+  MODIFY `appealStatusId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- AUTO_INCREMENT для таблицы `appealtype`
+--
+ALTER TABLE `appealtype`
+  MODIFY `appealTypeId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- AUTO_INCREMENT для таблицы `attachment`
+--
+ALTER TABLE `attachment`
+  MODIFY `attachmentId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+
+--
+-- AUTO_INCREMENT для таблицы `currency`
+--
+ALTER TABLE `currency`
+  MODIFY `currencyId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+
+--
+-- AUTO_INCREMENT для таблицы `department`
+--
+ALTER TABLE `department`
+  MODIFY `departmentId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- AUTO_INCREMENT для таблицы `employee`
+--
+ALTER TABLE `employee`
+  MODIFY `employeeId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+
+--
+-- AUTO_INCREMENT для таблицы `message`
+--
+ALTER TABLE `message`
+  MODIFY `messageId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- AUTO_INCREMENT для таблицы `order`
+--
+ALTER TABLE `order`
+  MODIFY `orderId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+
+--
+-- AUTO_INCREMENT для таблицы `ordercontent`
+--
+ALTER TABLE `ordercontent`
+  MODIFY `orderContentId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+
+--
+-- AUTO_INCREMENT для таблицы `orderstatus`
+--
+ALTER TABLE `orderstatus`
+  MODIFY `orderStatusId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- AUTO_INCREMENT для таблицы `positions`
+--
+ALTER TABLE `positions`
+  MODIFY `positionId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- AUTO_INCREMENT для таблицы `price`
+--
+ALTER TABLE `price`
+  MODIFY `priceId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- AUTO_INCREMENT для таблицы `product`
+--
+ALTER TABLE `product`
+  MODIFY `productId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- AUTO_INCREMENT для таблицы `producttype`
+--
+ALTER TABLE `producttype`
+  MODIFY `productTypeId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+
+--
+-- AUTO_INCREMENT для таблицы `role`
+--
+ALTER TABLE `role`
+  MODIFY `roleId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- AUTO_INCREMENT для таблицы `user`
+--
+ALTER TABLE `user`
+  MODIFY `userId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
+
+--
+-- AUTO_INCREMENT для таблицы `waitinglist`
+--
+ALTER TABLE `waitinglist`
+  MODIFY `waitingListId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+
+--
+-- AUTO_INCREMENT для таблицы `waitinglistcontent`
+--
+ALTER TABLE `waitinglistcontent`
+  MODIFY `waitingListContentId` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- Ограничения внешнего ключа сохраненных таблиц
+--
+
+--
+-- Ограничения внешнего ключа таблицы `appeal`
+--
+ALTER TABLE `appeal`
+  ADD CONSTRAINT `appeal_ibfk_1` FOREIGN KEY (`appealStatusId`) REFERENCES `appealstatus` (`appealStatusId`),
+  ADD CONSTRAINT `appeal_ibfk_2` FOREIGN KEY (`userId`) REFERENCES `user` (`userId`),
+  ADD CONSTRAINT `appeal_ibfk_3` FOREIGN KEY (`employeeId`) REFERENCES `employee` (`employeeId`),
+  ADD CONSTRAINT `appeal_ibfk_4` FOREIGN KEY (`appealTypeId`) REFERENCES `appealtype` (`appealTypeId`);
+
+--
+-- Ограничения внешнего ключа таблицы `attachment`
+--
+ALTER TABLE `attachment`
+  ADD CONSTRAINT `attachment_ibfk_1` FOREIGN KEY (`messageId`) REFERENCES `message` (`messageId`);
+
+--
+-- Ограничения внешнего ключа таблицы `employee`
+--
+ALTER TABLE `employee`
+  ADD CONSTRAINT `employee_ibfk_1` FOREIGN KEY (`positionId`) REFERENCES `positions` (`positionId`),
+  ADD CONSTRAINT `employee_ibfk_2` FOREIGN KEY (`userId`) REFERENCES `user` (`userId`),
+  ADD CONSTRAINT `employee_ibfk_3` FOREIGN KEY (`departmentId`) REFERENCES `department` (`departmentId`);
+
+--
+-- Ограничения внешнего ключа таблицы `message`
+--
+ALTER TABLE `message`
+  ADD CONSTRAINT `message_ibfk_1` FOREIGN KEY (`userId`) REFERENCES `user` (`userId`),
+  ADD CONSTRAINT `message_ibfk_2` FOREIGN KEY (`appealId`) REFERENCES `appeal` (`appealId`);
+
+--
+-- Ограничения внешнего ключа таблицы `order`
+--
+ALTER TABLE `order`
+  ADD CONSTRAINT `order_ibfk_1` FOREIGN KEY (`userId`) REFERENCES `user` (`userId`),
+  ADD CONSTRAINT `order_ibfk_2` FOREIGN KEY (`orderStatusId`) REFERENCES `orderstatus` (`orderStatusId`),
+  ADD CONSTRAINT `order_ibfk_3` FOREIGN KEY (`employeeId`) REFERENCES `employee` (`employeeId`),
+  ADD CONSTRAINT `order_ibfk_4` FOREIGN KEY (`currencyId`) REFERENCES `currency` (`currencyId`);
+
+--
+-- Ограничения внешнего ключа таблицы `ordercontent`
+--
+ALTER TABLE `ordercontent`
+  ADD CONSTRAINT `ordercontent_ibfk_1` FOREIGN KEY (`orderId`) REFERENCES `order` (`orderId`),
+  ADD CONSTRAINT `ordercontent_ibfk_2` FOREIGN KEY (`productId`) REFERENCES `product` (`productId`),
+  ADD CONSTRAINT `ordercontent_ibfk_3` FOREIGN KEY (`currencyId`) REFERENCES `currency` (`currencyId`);
+
+--
+-- Ограничения внешнего ключа таблицы `price`
+--
+ALTER TABLE `price`
+  ADD CONSTRAINT `price_ibfk_1` FOREIGN KEY (`productId`) REFERENCES `product` (`productId`),
+  ADD CONSTRAINT `price_ibfk_2` FOREIGN KEY (`currencyId`) REFERENCES `currency` (`currencyId`);
+
+--
+-- Ограничения внешнего ключа таблицы `product`
+--
+ALTER TABLE `product`
+  ADD CONSTRAINT `product_ibfk_1` FOREIGN KEY (`productTypeId`) REFERENCES `producttype` (`productTypeId`);
+
+--
+-- Ограничения внешнего ключа таблицы `user`
+--
+ALTER TABLE `user`
+  ADD CONSTRAINT `user_ibfk_1` FOREIGN KEY (`roleId`) REFERENCES `role` (`roleId`);
+
+--
+-- Ограничения внешнего ключа таблицы `waitinglist`
+--
+ALTER TABLE `waitinglist`
+  ADD CONSTRAINT `waitinglist_ibfk_1` FOREIGN KEY (`userId`) REFERENCES `user` (`userId`);
+
+--
+-- Ограничения внешнего ключа таблицы `waitinglistcontent`
+--
+ALTER TABLE `waitinglistcontent`
+  ADD CONSTRAINT `waitinglistcontent_ibfk_1` FOREIGN KEY (`productId`) REFERENCES `product` (`productId`),
+  ADD CONSTRAINT `waitinglistcontent_ibfk_2` FOREIGN KEY (`waitingListId`) REFERENCES `waitinglist` (`waitingListId`);
+COMMIT;
+
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
